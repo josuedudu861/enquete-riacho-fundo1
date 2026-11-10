@@ -1,0 +1,10 @@
+import http from 'node:http';
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync,mkdirSync} from 'node:fs';
+import worker from '../worker/index.js';
+mkdirSync('.sites-runtime',{recursive:true});
+const db=new DatabaseSync('.sites-runtime/preview.sqlite');
+if(!db.prepare("SELECT name FROM sqlite_master WHERE name='votes'").get())db.exec(readFileSync('drizzle/0000_votes.sql','utf8'));
+const DB={prepare(sql){let args=[];return {bind(...v){args=v;return this},async run(){const r=db.prepare(sql).run(...args);return {meta:{changes:Number(r.changes)}}},async first(){return db.prepare(sql).get(...args)},async all(){return {results:db.prepare(sql).all(...args)}}}},async batch(stmts){return Promise.all(stmts.map(s=>s.all()))}};
+const port=Number(process.argv[process.argv.indexOf('--port')+1])||4173;
+http.createServer(async(req,res)=>{try{let body='';for await(const chunk of req)body+=chunk;const request=new Request('http://'+req.headers.host+req.url,{method:req.method,headers:req.headers,...(['GET','HEAD'].includes(req.method)?{}:{body})});const response=await worker.fetch(request,{DB});res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));}catch(e){res.writeHead(500);res.end('Preview error');console.error(e)}}).listen(port,'0.0.0.0');
